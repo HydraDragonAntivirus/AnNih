@@ -1,2 +1,2 @@
+pyttsx3
 pywin32
-wmi
