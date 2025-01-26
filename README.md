@@ -1,2 +1,2 @@
 # AnNih
- Easy Bitdefender bypass with Ransomware
+ Yet Another Easy Bitdefender, Kaspersky bypass with Ransomware
