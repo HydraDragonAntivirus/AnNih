@@ -9,7 +9,7 @@ executables = [
     Executable(
         "AnNih.py",  # Your script
         target_name="AnNih.exe",  # Output executable name
-        base="Win32GUI",  # Win32GUI application
+        base="console",  # Win32GUI application
         icon="assets/Annihilation.ico",  # Path to your .ico file
         uac_admin=True  # Request admin privileges
     )

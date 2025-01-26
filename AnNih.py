@@ -5,7 +5,7 @@ import time
 import winreg
 import shutil
 from datetime import datetime
-from pywin32 import win32security, win32api, win32con
+import win32security, win32api, win32con
 import win32file
 import sys
 import wmi
